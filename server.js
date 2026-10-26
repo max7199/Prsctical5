@@ -1,52 +1,56 @@
 // =============================================================================
-// Practical 4: Building a RESTful API with Node.js and Express
+// Practical 5: MongoDB Integration and Schema Design with Mongoose
 // File: server.js
-// Description: RESTful Task Management API using Express and In-Memory Storage
+// Description: RESTful Task Management API using Express, MongoDB, and Mongoose
 // =============================================================================
 
+require('dotenv').config();
 const express = require('express');
+const mongoose = require('mongoose');
+const Task = require('./models/Task');
+
 const app = express();
 const PORT = process.env.PORT || 5000;
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/task_manager';
 
 // =============================================================================
-// In-Memory Data Store
+// Database Connection
 // =============================================================================
-// Tasks are stored in memory for the duration of server execution.
-// Initial sample tasks provided as required.
-let tasks = [
-  {
-    id: 1,
-    title: "Complete Practical 4",
-    description: "Build RESTful API using Express",
-    completed: false
-  },
-  {
-    id: 2,
-    title: "Prepare for Viva Examination",
-    description: "Review REST concepts and Express middleware lifecycle",
-    completed: false
+/**
+ * Connects to MongoDB using Mongoose.
+ * Logs success only after connection is established.
+ * Throws on failure to prevent starting server without a working database.
+ */
+async function connectDB(uri = MONGO_URI) {
+  try {
+    const conn = await mongoose.connect(uri);
+    const host = conn.connection.host;
+    const port = conn.connection.port || '27017';
+    const dbName = conn.connection.name;
+    console.log(`Successfully connected to MongoDB at ${host}:${port}/${dbName}`);
+    return conn;
+  } catch (err) {
+    console.error('Failed to connect to MongoDB:', err.message);
+    throw err;
   }
-];
-
-// Counter for auto-generating unique numeric IDs
-let nextTaskId = 3;
+}
 
 // =============================================================================
 // Middleware Pipeline (Registered in sequential execution order)
 // =============================================================================
 
-// A. JSON Middleware: Parses incoming requests with JSON payloads
+// 1. JSON Middleware: Parses incoming requests with JSON payloads
 app.use(express.json());
 
-// B. Global Request Logging Middleware: Logs method, URL, and ISO timestamp
+// 2. Global Request Logging Middleware: Logs HTTP method, URL, and ISO timestamp
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   console.log(`${req.method} ${req.url} - ${timestamp}`);
   next(); // Pass control to the next middleware in the pipeline
 });
 
-// C. Content-Type Validation Middleware:
-// Applies only to POST and PUT requests to ensure clients send application/json.
+// 3. Content-Type Validation Middleware:
+// Applies to POST and PUT requests to ensure clients send application/json.
 // GET and DELETE requests proceed without body content-type restriction.
 app.use((req, res, next) => {
   if (req.method === 'POST' || req.method === 'PUT') {
@@ -61,22 +65,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// D. Task ID Validation Middleware:
-// Route-specific middleware for routes with :id parameter (PUT, DELETE, and GET /tasks/:id).
-// Validates that :id is a positive integer before controller execution.
-const validateTaskId = (req, res, next) => {
+// 4. Route-Specific Middleware: Validate MongoDB ObjectId
+// Validates that :id parameter is a 24-character hexadecimal string before querying
+const validateObjectId = (req, res, next) => {
   const rawId = req.params.id ? String(req.params.id).trim() : '';
-  const parsedId = Number(rawId);
 
-  if (!rawId || isNaN(parsedId) || !Number.isInteger(parsedId) || parsedId <= 0) {
+  if (!rawId || !mongoose.Types.ObjectId.isValid(rawId)) {
     return res.status(400).json({
       error: 'Invalid Task ID',
-      message: 'Task ID must be a valid positive integer'
+      message: `The provided ID '${rawId}' is not a valid MongoDB ObjectId`
     });
   }
 
-  // Attach validated numeric ID to request object for route handlers
-  req.taskId = parsedId;
   next();
 };
 
@@ -86,105 +86,95 @@ const asyncHandler = (fn) => (req, res, next) => {
 };
 
 // =============================================================================
-// API CRUD Routes (Defined BEFORE the 404 handler)
+// API CRUD Routes (MongoDB-backed via Mongoose Task model)
 // =============================================================================
 
-// 1. GET /tasks - Retrieve all tasks (also supports /task alias)
+// 1. GET /tasks - Retrieve all tasks from MongoDB (also supports /task alias)
 app.get(['/tasks', '/task'], asyncHandler(async (req, res) => {
+  const tasks = await Task.find();
   return res.status(200).json(tasks);
 }));
 
-// GET /tasks/:id - Retrieve a specific task by ID (helpful for testing & verification)
-app.get(['/tasks/:id', '/task/:id'], validateTaskId, asyncHandler(async (req, res) => {
-  const taskId = req.taskId !== undefined ? req.taskId : Number(req.params.id);
-  const task = tasks.find(t => t.id === taskId);
+// 5. GET /tasks/:id - Retrieve a specific task by MongoDB ObjectId (Supplementary endpoint)
+app.get(['/tasks/:id', '/task/:id'], validateObjectId, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const task = await Task.findById(id);
 
   if (!task) {
     return res.status(404).json({
       error: 'Task Not Found',
-      message: `Task with ID ${taskId} does not exist`
+      message: `Task with ID ${id} does not exist`
     });
   }
 
   return res.status(200).json(task);
 }));
 
-// 2. POST /tasks - Create a new task (also supports /task alias)
+// 2. POST /tasks - Create a new task in MongoDB (also supports /task alias)
 app.post(['/tasks', '/task'], asyncHandler(async (req, res) => {
-  const { title, description, completed } = req.body;
+  const { title, description, completed, priority } = req.body;
 
-  // Validation: title is required and cannot be empty
-  if (!title || typeof title !== 'string' || title.trim() === '') {
-    return res.status(400).json({
-      error: 'Validation Error',
-      message: 'Title is required and must be a non-empty string'
-    });
-  }
+  // Build document payload from client request
+  const taskData = {};
+  if (title !== undefined) taskData.title = typeof title === 'string' ? title.trim() : title;
+  if (description !== undefined) taskData.description = description;
+  if (completed !== undefined) taskData.completed = completed;
+  if (priority !== undefined) taskData.priority = priority;
 
-  const newTask = {
-    id: nextTaskId++,
-    title: title.trim(),
-    description: typeof description === 'string' ? description.trim() : '',
-    completed: Boolean(completed)
-  };
+  // Create new task instance to trigger pre-save hook and schema validation
+  const newTask = new Task(taskData);
+  const savedTask = await newTask.save();
 
-  tasks.push(newTask);
-  return res.status(201).json(newTask);
+  return res.status(201).json(savedTask);
 }));
 
-// 3. PUT /tasks/:id - Update an existing task (uses route-specific validateTaskId middleware)
-app.put(['/tasks/:id', '/task/:id'], validateTaskId, asyncHandler(async (req, res) => {
-  const taskId = req.taskId !== undefined ? req.taskId : Number(req.params.id);
-  const task = tasks.find(t => t.id === taskId);
+// 3. PUT /tasks/:id - Update an existing task in MongoDB by ObjectId
+app.put(['/tasks/:id', '/task/:id'], validateObjectId, asyncHandler(async (req, res) => {
+  const { id } = req.params;
 
-  // Return 404 if the task doesn't exist
-  if (!task) {
-    return res.status(404).json({
-      error: 'Task Not Found',
-      message: `Task with ID ${taskId} does not exist`
-    });
-  }
+  // Whitelist modifiable fields - prevent modifying immutable/server-managed fields (_id, createdAt)
+  const allowedFields = ['title', 'description', 'completed', 'priority'];
+  const updatePayload = {};
 
-  const { title, description, completed } = req.body;
-
-  // If title was provided in the update, validate it is not empty
-  if (title !== undefined) {
-    if (typeof title !== 'string' || title.trim() === '') {
-      return res.status(400).json({
-        error: 'Validation Error',
-        message: 'Title must be a non-empty string'
-      });
+  for (const field of allowedFields) {
+    if (req.body[field] !== undefined) {
+      updatePayload[field] = req.body[field];
     }
-    task.title = title.trim();
   }
 
-  // Update description if provided, otherwise preserve existing
-  if (description !== undefined) {
-    task.description = typeof description === 'string' ? description.trim() : '';
+  // If title was provided in the update, trim whitespace
+  if (typeof updatePayload.title === 'string') {
+    updatePayload.title = updatePayload.title.trim();
   }
 
-  // Update completed status if provided, otherwise preserve existing
-  if (completed !== undefined) {
-    task.completed = Boolean(completed);
-  }
+  // Find and update document with runValidators enabled to enforce schema constraints
+  const updatedTask = await Task.findByIdAndUpdate(
+    id,
+    updatePayload,
+    { returnDocument: 'after', runValidators: true }
+  );
 
-  return res.status(200).json(task);
-}));
-
-// 4. DELETE /tasks/:id - Delete an existing task (uses route-specific validateTaskId middleware)
-app.delete(['/tasks/:id', '/task/:id'], validateTaskId, asyncHandler(async (req, res) => {
-  const taskId = req.taskId !== undefined ? req.taskId : Number(req.params.id);
-  const taskIndex = tasks.findIndex(t => t.id === taskId);
-
-  // Return 404 if the task doesn't exist
-  if (taskIndex === -1) {
+  if (!updatedTask) {
     return res.status(404).json({
       error: 'Task Not Found',
-      message: `Task with ID ${taskId} does not exist`
+      message: `Task with ID ${id} does not exist`
     });
   }
 
-  const deletedTask = tasks.splice(taskIndex, 1)[0];
+  return res.status(200).json(updatedTask);
+}));
+
+// 4. DELETE /tasks/:id - Delete an existing task from MongoDB by ObjectId
+app.delete(['/tasks/:id', '/task/:id'], validateObjectId, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const deletedTask = await Task.findByIdAndDelete(id);
+
+  if (!deletedTask) {
+    return res.status(404).json({
+      error: 'Task Not Found',
+      message: `Task with ID ${id} does not exist`
+    });
+  }
 
   return res.status(200).json({
     message: 'Task deleted successfully',
@@ -193,7 +183,7 @@ app.delete(['/tasks/:id', '/task/:id'], validateTaskId, asyncHandler(async (req,
 }));
 
 // =============================================================================
-// 404 Handler for Undefined Routes (Must be after all API routes)
+// 404 Handler for Undefined Routes (Must be registered after all API routes)
 // =============================================================================
 app.use((req, res, next) => {
   res.status(404).json({
@@ -203,13 +193,13 @@ app.use((req, res, next) => {
 });
 
 // =============================================================================
-// Global Error-Handling Middleware (Must be registered LAST with 4 arguments)
+// Global Error-Handling Middleware (Must have 4 arguments: err, req, res, next)
 // =============================================================================
 app.use((err, req, res, next) => {
   // Log detailed error on the server console for debugging
   console.error('[Server Error]', err.stack || err);
 
-  // Catch malformed JSON body errors thrown by express.json()
+  // 1. Catch malformed JSON body errors thrown by express.json()
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     return res.status(400).json({
       error: 'Malformed JSON',
@@ -217,7 +207,32 @@ app.use((err, req, res, next) => {
     });
   }
 
-  // Generic 500 response - never expose stack trace or sensitive info to clients
+  // 2. Catch Mongoose schema validation errors
+  if (err.name === 'ValidationError') {
+    const details = Object.values(err.errors).map(e => e.message);
+    return res.status(400).json({
+      error: 'Validation failed',
+      details: details
+    });
+  }
+
+  // 3. Catch Mongoose CastError (invalid ObjectId or type casting failure)
+  if (err.name === 'CastError') {
+    return res.status(400).json({
+      error: 'Invalid ID or Data Type',
+      message: `Invalid value '${err.value}' for field '${err.path}'`
+    });
+  }
+
+  // 4. Catch MongoDB duplicate-key errors (Error code 11000)
+  if (err.code === 11000) {
+    return res.status(400).json({
+      error: 'Duplicate Key Error',
+      message: 'A record with that unique field value already exists'
+    });
+  }
+
+  // 5. Generic 500 response - never expose stack trace or database internals to clients
   return res.status(500).json({
     error: 'Internal Server Error',
     message: 'An unexpected error occurred on the server'
@@ -227,10 +242,29 @@ app.use((err, req, res, next) => {
 // =============================================================================
 // Server Initialization
 // =============================================================================
-if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`Task Management API server running on http://localhost:${PORT}`);
-  });
+/**
+ * Starts the HTTP server only AFTER the database connection succeeds.
+ * Exits with failure code if database connection fails.
+ */
+async function startServer(port = PORT, uri = MONGO_URI) {
+  try {
+    await connectDB(uri);
+    return new Promise((resolve) => {
+      const server = app.listen(port, () => {
+        console.log(`Task Management API server running on http://localhost:${port}`);
+        resolve(server);
+      });
+    });
+  } catch (err) {
+    console.error('Server startup aborted due to database connection failure.');
+    process.exit(1);
+  }
 }
 
+if (require.main === module) {
+  startServer();
+}
+
+app.connectDB = connectDB;
+app.startServer = startServer;
 module.exports = app;

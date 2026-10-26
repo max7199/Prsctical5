@@ -1,13 +1,15 @@
 # Dependencies
 node_modules/
 
+# Environment variables
+.env
+.env.*
+!.env.example
+
 # Logs
 logs
 *.log
 npm-debug.log*
-
-# Environment variables
-.env
 
 # OS Files
 .DS_Store

@@ -1,276 +1,458 @@
-# Practical 4: Building a RESTful API with Node.js and Express
+# Practical 5: MongoDB Integration and Schema Design with Mongoose
 
 ## 1. Objective
-To design and build a RESTful Task Management API using **Node.js** and **Express.js**, implement the four core CRUD operations (Create, Read, Update, Delete) using an in-memory data store, establish a clean middleware execution pipeline with request validation and logging, and implement robust error-handling mechanisms.
+To extend the Task Management REST API developed in Practical 4 by integrating **MongoDB** using **Mongoose ODM**. This practical demonstrates transitioning from an in-memory storage array to persistent NoSQL database storage, designing a structured Mongoose schema with data types, defaults, validation rules, enums, and a pre-save hook, handling MongoDB ObjectIds in Express routes, and enforcing application-level data integrity and clean error handling.
 
 ---
 
-## 2. Project Overview & Folder Structure
+## 2. Technologies Used
+- **Node.js**: JavaScript runtime environment for backend logic.
+- **Express.js**: Minimal web framework for routing and middleware pipelines.
+- **MongoDB**: NoSQL document database for persistent data storage.
+- **Mongoose (v8/v9)**: Object Data Modeling (ODM) library for MongoDB providing schema validation and hooks.
+- **dotenv**: Environment variable management to keep configuration and credentials secure.
+- **CommonJS**: Standard `require()` syntax matching Practical 4 architecture.
+
+---
+
+## 3. Project Folder Structure
 
 ```text
-task-manager-api/
-├── node_modules/         # Third-party dependencies (Express)
-├── .gitignore            # Git exclusion file (node_modules, logs, .env)
-├── package.json          # Project configuration, scripts, and dependencies
-├── server.js             # Main server, middleware pipeline, and CRUD routes
-├── test-api.http         # VS Code REST Client test requests
-├── test-runner.js        # Automated verification script for 10 test scenarios
-└── README.md             # Documentation, API reference, and Viva Q&A
+p4/
+├── models/
+│   └── Task.js           # Mongoose Schema, Model, and pre-save hook
+├── node_modules/         # Dependencies (Express, Mongoose, dotenv)
+├── .env                  # Local environment configuration (PORT, MONGO_URI - Git ignored)
+├── .env.example          # Safe template configuration for submission/cloning
+├── .gitignore            # Git exclusion rules (ignores .env and node_modules)
+├── package.json          # Project metadata, dependencies, and npm scripts
+├── package-lock.json     # Deterministic dependency lock file
+├── README.md             # Complete practical documentation and Viva guide
+├── server.js             # Main server, MongoDB connection, middleware, and CRUD routes
+├── test-api.http         # Ready-to-run REST Client HTTP requests
+└── test-runner.js        # Automated test suite executing all 15 test scenarios
 ```
 
 ---
 
-## 3. Installation & Getting Started
+## 4. Environment Variables Configuration
 
-### Prerequisites
-- **Node.js** (v18 or higher recommended; verified on Node v24)
-- **npm** (v9 or higher; verified on npm v11)
+Sensitive configurations such as database connection strings and port numbers are managed using `dotenv`.
 
-### Step 1: Install Dependencies
-Open your terminal in the project directory and run:
+### Local `.env` File (Created locally, never committed to GitHub)
+```env
+PORT=5000
+MONGO_URI=mongodb://127.0.0.1:27017/task_manager
+```
+
+### Safe Template `.env.example` (Committed to GitHub)
+```env
+# Server Configuration
+PORT=5000
+
+# MongoDB Connection URI (Local default or MongoDB Atlas connection string)
+MONGO_URI=mongodb://127.0.0.1:27017/task_manager
+# Atlas example: mongodb+srv://<username>:<password>@cluster0.mongodb.net/task_manager?retryWrites=true&w=majority
+```
+
+---
+
+## 5. MongoDB Setup Guide
+
+### Option A: Local MongoDB (Default & Recommended)
+1. Ensure the **MongoDB Community Server** service is installed and running on your system.
+   - On Windows, verify using PowerShell:
+     ```powershell
+     Get-Service -Name MongoDB
+     ```
+2. The default connection string is:
+   ```text
+   mongodb://127.0.0.1:27017/task_manager
+   ```
+3. MongoDB will automatically create the `task_manager` database and `tasks` collection upon saving the first document.
+
+### Option B: MongoDB Atlas (Cloud Alternative)
+If local MongoDB is not installed on your system:
+1. Sign up for a free account at [MongoDB Atlas](https://www.mongodb.com/cloud/atlas).
+2. Create a free shared cluster (M0 sandbox).
+3. Under **Database Access**, create a database user (e.g., `admin`) and set a password.
+4. Under **Network Access**, add IP address `0.0.0.0/0` (Allow access from anywhere).
+5. Click **Connect** -> **Connect your application** -> Copy the connection string.
+6. Paste it into your `.env` file:
+   ```env
+   PORT=5000
+   MONGO_URI=mongodb+srv://admin:<your-password>@cluster0.mongodb.net/task_manager?retryWrites=true&w=majority
+   ```
+
+---
+
+## 6. Installation & How to Run
+
+### Step 1: Clone / Open Repository
+Open terminal in the project directory:
+```bash
+cd "d:\5THSEM WDF\p4"
+```
+
+### Step 2: Install Dependencies
 ```bash
 npm install
 ```
 
-### Step 2: Start the Server
-Start the Express server on port `5000`:
+### Step 3: Start the Application
 ```bash
 npm start
 ```
-
-You should see:
+The server will connect to MongoDB first before accepting requests:
 ```text
+Successfully connected to MongoDB at 127.0.0.1:27017/task_manager
 Task Management API server running on http://localhost:5000
 ```
+> **Note**: If MongoDB is not running, the application will display a clear error and cleanly exit instead of falling back to in-memory data.
 
-### Step 3: Run Automated Test Suite
-To execute the automated 10-endpoint test verification:
+### Step 4: Run the Automated Test Suite
+To execute all 15 automated validation and CRUD tests:
 ```bash
-npm run test:api
+npm test
 ```
 
 ---
 
-## 4. Middleware Execution Lifecycle
+## 7. Mongoose Task Schema & Pre-Save Hook
 
-Express processes requests through a sequential pipeline from top to bottom. In this project, requests flow through the following stages:
+The Task schema is defined in [`models/Task.js`](file:///d:/5THSEM%20WDF/p4/models/Task.js):
+
+| Field | Type | Validation / Constraints | Default Value | Description |
+|---|---|---|---|---|
+| `title` | `String` | `required: true`, `trim: true`, Custom non-empty validator | None | Task title; cannot be empty or whitespace |
+| `description` | `String` | Optional | `""` (empty string) | Detailed explanation of task |
+| `completed` | `Boolean` | Boolean | `false` | Status of completion |
+| `priority` | `String` | Enum: `['low', 'medium', 'high']` | `"medium"` | Priority level of task |
+| `createdAt` | `Date` | Date | `Date.now` | Creation timestamp |
+
+### Application-Level Validation in Mongoose
+Unlike relational databases where constraints are enforced by table schemas inside the database engine, **Mongoose enforces schema validation at the application level in Node.js** before documents are sent to MongoDB. If a document fails validation (e.g., missing title or priority = "urgent"), Mongoose aborts the operation and returns a structured `ValidationError` without making an unnecessary database write.
+
+### Pre-Save Hook (`pre('save')`)
+A pre-save hook is document middleware in Mongoose executed immediately before a document is persisted to MongoDB. In this project:
+```javascript
+taskSchema.pre('save', function (next) {
+  if (this.title && typeof this.title === 'string') {
+    this.title = this.title.trim();
+  }
+  if (typeof next === 'function') {
+    next();
+  }
+});
+```
+This hook guarantees that any accidental leading or trailing whitespace is stripped before the document is stored.
+
+---
+
+## 8. Understanding MongoDB ObjectIds
+
+In Practical 4, tasks used simple auto-incremented numeric IDs (`1`, `2`, `3`). In Practical 5, MongoDB uses **12-byte BSON ObjectIds** represented as **24-character hexadecimal strings** (e.g., `6adf36f0adcf4ff5723b0264`).
+
+### Structure of an ObjectId:
+- **4 bytes**: Unix timestamp of creation (seconds since epoch).
+- **5 bytes**: Random unique process identifier.
+- **3 bytes**: Incrementing counter.
+
+### Why ObjectIds replace Numeric IDs:
+1. **Globally Unique**: Safe for distributed and clustered database architectures without central coordination.
+2. **Built-in Timestamp**: Creation time can be extracted directly from the ID.
+3. **Validation**: Verified using `mongoose.Types.ObjectId.isValid(id)`. Any non-hexadecimal or wrong-length ID immediately returns `400 Bad Request`.
+
+---
+
+## 9. Middleware Execution Pipeline
+
+Requests pass through a sequential pipeline in `server.js`:
 
 ```mermaid
 flowchart TD
     ClientReq[Client HTTP Request] --> M1[1. express.json: Parses JSON body]
-    M1 --> M2["2. Global Logger: Logs Method, URL & ISO Timestamp"]
+    M1 --> M2["2. Request Logger: Logs Method, URL & ISO Timestamp"]
     M2 --> M3{"3. Content-Type Check: Is POST or PUT?"}
-    M3 -- Yes and missing or not application/json --> Err400["Return 400 Bad Request"]
-    M3 -- Yes and valid OR GET/DELETE --> RouteCheck{"Matching Route Found?"}
-    RouteCheck -- PUT or DELETE /tasks/:id --> M4{"4. validateTaskId: Is :id a positive integer?"}
-    M4 -- No --> ErrId400["Return 400 Bad Request"]
-    M4 -- Yes --> Handler["Controller Action (CRUD Handler)"]
+    M3 -- Missing or not application/json --> Err400["Return 400 Bad Request"]
+    M3 -- Valid JSON OR GET/DELETE --> RouteCheck{"Matching Route Found?"}
+    RouteCheck -- Route with :id --> M4{"4. validateObjectId: Is :id a 24-hex ObjectId?"}
+    M4 -- No --> ErrId400["Return 400 Bad Request (Invalid Task ID)"]
+    M4 -- Yes --> Handler["Mongoose CRUD Controller"]
     RouteCheck -- GET or POST /tasks --> Handler
     Handler --> SuccessResponse["Return Response (200 / 201 / 404)"]
     RouteCheck -- No Route Matched --> Custom404["5. Custom 404 Handler (Route not found)"]
-    Handler -- Throws / next(err) --> GlobalErrorHandler["6. Global Error Handler (err, req, res, next) -> 500"]
+    Handler -- Throws ValidationError / CastError --> GlobalErrorHandler["6. Global Error Handler (4 arguments)"]
 ```
 
-### Pipeline Breakdown:
-1. **`express.json()`**: Reads incoming payload streams and parses JSON into `req.body`.
-2. **Global Logging Middleware**: Logs `METHOD URL - TIMESTAMP` (e.g., `GET /tasks - 2026-10-21T11:04:29.535Z`).
-3. **Content-Type Validation**: Ensures `POST` and `PUT` requests carry `Content-Type: application/json`.
-4. **Task ID Validation (`validateTaskId`)**: Route-specific middleware verifying that `:id` is a positive integer before hitting controller logic.
-5. **Route Handlers**: Execute business logic against the in-memory array.
-6. **404 Catch-All Handler**: Returns structured JSON for unknown routes.
-7. **Global Error Middleware**: Catches unhandled errors or malformed JSON payloads and returns clean HTTP responses.
+### Pipeline Summary:
+1. **`express.json()`**: Parses incoming JSON request payloads.
+2. **Request Logger**: Logs method, URL, and timestamp (e.g., `POST /tasks - 2026-10-26T11:18:08.241Z`).
+3. **Content-Type Validator**: Enforces `Content-Type: application/json` for `POST` and `PUT`.
+4. **`validateObjectId` Middleware**: Verifies `:id` parameter format before Mongoose queries are made.
+5. **Route Handlers**: Execute MongoDB operations via `Task.find()`, `Task.create()`, `Task.findById()`, `Task.findByIdAndUpdate()`, `Task.findByIdAndDelete()`.
+6. **404 Catch-All Handler**: Returns structured JSON for unknown endpoints.
+7. **Global Error Handler**: Four-argument middleware catching Mongoose `ValidationError`, `CastError`, duplicate-key errors, and server errors without leaking stack traces.
 
 ---
 
-## 5. API Endpoints Documentation
+## 10. API Endpoints Reference
 
 **Base URL**: `http://localhost:5000`
 
 | Method | Endpoint | Description | Status Code | Required Headers |
 |---|---|---|---|---|
-| `GET` | `/tasks` | Retrieve all tasks | `200 OK` | None |
-| `POST` | `/tasks` | Create a new task | `201 Created` | `Content-Type: application/json` |
-| `PUT` | `/tasks/:id` | Update an existing task | `200 OK` | `Content-Type: application/json` |
-| `DELETE` | `/tasks/:id` | Delete a task | `200 OK` | None |
+| `GET` | `/tasks` | Retrieve all task documents | `200 OK` | `Accept: application/json` |
+| `POST` | `/tasks` | Create a new task document | `201 Created` | `Content-Type: application/json` |
+| `GET` | `/tasks/:id` | Retrieve single task by ObjectId | `200 OK` / `404` | `Accept: application/json` |
+| `PUT` | `/tasks/:id` | Update task by ObjectId | `200 OK` / `404` | `Content-Type: application/json` |
+| `DELETE` | `/tasks/:id` | Delete task by ObjectId | `200 OK` / `404` | None |
 
 ---
 
-## 6. Request & Response Examples
+## 11. Request & Response Examples
 
-### A. GET /tasks
-- **Method**: `GET`
-- **URL**: `http://localhost:5000/tasks`
-- **Response**: `200 OK`
+### 1. GET /tasks
+- **Request**: `GET http://localhost:5000/tasks`
+- **Response (200 OK)**:
 ```json
 [
   {
-    "id": 1,
-    "title": "Complete Practical 4",
-    "description": "Build RESTful API using Express",
-    "completed": false
-  },
-  {
-    "id": 2,
-    "title": "Prepare for Viva Examination",
-    "description": "Review REST concepts and Express middleware lifecycle",
-    "completed": false
+    "_id": "6adf380cbb73e2db400d2700",
+    "title": "Complete Practical 5",
+    "description": "Integrate MongoDB with Express and Mongoose",
+    "completed": false,
+    "priority": "high",
+    "createdAt": "2026-10-26T11:22:52.290Z"
   }
 ]
 ```
 
-### B. POST /tasks
-- **Method**: `POST`
-- **URL**: `http://localhost:5000/tasks`
-- **Headers**: `Content-Type: application/json`
-- **Request Body**:
+### 2. POST /tasks (Successful Creation)
+- **Request**: `POST http://localhost:5000/tasks`
+- **Header**: `Content-Type: application/json`
+- **Body**:
 ```json
 {
-  "title": "Submit Practical 4 Assignment",
-  "description": "Upload code repository and report",
-  "completed": false
+  "title": "Complete Practical 5",
+  "description": "Integrate MongoDB with Express",
+  "completed": false,
+  "priority": "high"
 }
 ```
-- **Response**: `201 Created`
+- **Response (201 Created)**:
 ```json
 {
-  "id": 3,
-  "title": "Submit Practical 4 Assignment",
-  "description": "Upload code repository and report",
-  "completed": false
-}
-```
-
-### C. PUT /tasks/:id
-- **Method**: `PUT`
-- **URL**: `http://localhost:5000/tasks/1`
-- **Headers**: `Content-Type: application/json`
-- **Request Body**:
-```json
-{
-  "completed": true
-}
-```
-- **Response**: `200 OK`
-```json
-{
-  "id": 1,
-  "title": "Complete Practical 4",
-  "description": "Build RESTful API using Express",
-  "completed": true
+  "_id": "6adf380cbb73e2db400d2700",
+  "title": "Complete Practical 5",
+  "description": "Integrate MongoDB with Express",
+  "completed": false,
+  "priority": "high",
+  "createdAt": "2026-10-26T11:22:52.290Z"
 }
 ```
 
-### D. DELETE /tasks/:id
-- **Method**: `DELETE`
-- **URL**: `http://localhost:5000/tasks/2`
-- **Response**: `200 OK`
+### 3. POST /tasks with Defaults (Omitted completed and priority)
+- **Request**: `POST http://localhost:5000/tasks`
+- **Body**:
+```json
+{
+  "title": "Task with defaults"
+}
+```
+- **Response (201 Created)**:
+```json
+{
+  "_id": "6adf380cbb73e2db400d2705",
+  "title": "Task with defaults",
+  "description": "",
+  "completed": false,
+  "priority": "medium",
+  "createdAt": "2026-10-26T11:23:10.150Z"
+}
+```
+
+### 4. POST /tasks (Validation Failure - Missing / Blank Title)
+- **Request**: `POST http://localhost:5000/tasks`
+- **Body**:
+```json
+{
+  "title": "   ",
+  "description": "Whitespace title"
+}
+```
+- **Response (400 Bad Request)**:
+```json
+{
+  "error": "Validation failed",
+  "details": [
+    "Path `title` is required."
+  ]
+}
+```
+
+### 5. POST /tasks (Validation Failure - Invalid Priority Enum)
+- **Request**: `POST http://localhost:5000/tasks`
+- **Body**:
+```json
+{
+  "title": "Invalid Priority Task",
+  "priority": "urgent"
+}
+```
+- **Response (400 Bad Request)**:
+```json
+{
+  "error": "Validation failed",
+  "details": [
+    "`urgent` is not a valid priority. Allowed values are: low, medium, high."
+  ]
+}
+```
+
+### 6. PUT /tasks/:id (Successful Update)
+- **Request**: `PUT http://localhost:5000/tasks/6adf380cbb73e2db400d2700`
+- **Header**: `Content-Type: application/json`
+- **Body**:
+```json
+{
+  "completed": true,
+  "priority": "low"
+}
+```
+- **Response (200 OK)**:
+```json
+{
+  "_id": "6adf380cbb73e2db400d2700",
+  "title": "Complete Practical 5",
+  "description": "Integrate MongoDB with Express",
+  "completed": true,
+  "priority": "low",
+  "createdAt": "2026-10-26T11:22:52.290Z"
+}
+```
+
+### 7. PUT /tasks/:id (Malformed ObjectId)
+- **Request**: `PUT http://localhost:5000/tasks/invalid-id`
+- **Response (400 Bad Request)**:
+```json
+{
+  "error": "Invalid Task ID",
+  "message": "The provided ID 'invalid-id' is not a valid MongoDB ObjectId"
+}
+```
+
+### 8. GET or PUT /tasks/:id (Nonexistent Valid ObjectId)
+- **Request**: `GET http://localhost:5000/tasks/507f1f77bcf86cd799439011`
+- **Response (404 Not Found)**:
+```json
+{
+  "error": "Task Not Found",
+  "message": "Task with ID 507f1f77bcf86cd799439011 does not exist"
+}
+```
+
+### 9. DELETE /tasks/:id (Successful Deletion)
+- **Request**: `DELETE http://localhost:5000/tasks/6adf380cbb73e2db400d2700`
+- **Response (200 OK)**:
 ```json
 {
   "message": "Task deleted successfully",
   "task": {
-    "id": 2,
-    "title": "Prepare for Viva Examination",
-    "description": "Review REST concepts and Express middleware lifecycle",
-    "completed": false
+    "_id": "6adf380cbb73e2db400d2700",
+    "title": "Complete Practical 5",
+    "description": "Integrate MongoDB with Express",
+    "completed": true,
+    "priority": "low",
+    "createdAt": "2026-10-26T11:22:52.290Z"
   }
 }
 ```
 
 ---
 
-## 7. Testing Instructions
+## 12. How to Verify Database Persistence
 
-### Option 1: VS Code REST Client Extension
-1. Install the **REST Client** extension in VS Code.
-2. Open [test-api.http](file:///d:/5THSEM%20WDF/p4/test-api.http).
-3. Click **"Send Request"** above any test case.
+### Verification Steps:
+1. **Create a task** using `POST /tasks`. Note the generated `_id`.
+2. **Verify via GET**: Fetch `GET /tasks` to see the document.
+3. **Stop the Node.js server**: Press `Ctrl + C` in the server terminal.
+4. **Restart the server**: Run `npm start`.
+5. **Re-query `GET /tasks`**: The task remains intact in the response!
 
-### Option 2: Postman Instructions
-1. Open Postman and create a new collection called **"Practical 4 Tasks"**.
-2. **GET /tasks**:
-   - Method: `GET`, URL: `http://localhost:5000/tasks`. Click **Send**.
-3. **POST /tasks**:
-   - Method: `POST`, URL: `http://localhost:5000/tasks`.
-   - Go to **Headers** tab: Verify `Content-Type: application/json`.
-   - Go to **Body** tab: Choose **raw** -> **JSON**. Enter:
-     ```json
-     { "title": "Postman Test Task", "description": "Testing from Postman", "completed": false }
-     ```
-   - Click **Send** (verify status `201 Created`).
-4. **PUT /tasks/1**:
-   - Method: `PUT`, URL: `http://localhost:5000/tasks/1`.
-   - Body: `raw` -> `JSON`: `{ "completed": true }`. Click **Send** (`200 OK`).
-5. **DELETE /tasks/1**:
-   - Method: `DELETE`, URL: `http://localhost:5000/tasks/1`. Click **Send** (`200 OK`).
-6. **Error Case Testing**:
-   - Try `PUT /tasks/abc` -> returns `400 Bad Request`.
-   - Try `GET /invalid-url` -> returns `404 Not Found`.
-
-### Option 3: Automated Script
-Run:
+### Inspecting via MongoDB Shell (`mongosh`):
+Open your terminal and run:
 ```bash
-npm run test:api
+mongosh task_manager
 ```
-All 10 test scenarios execute against a live server instance and verify response codes.
+Inside the shell:
+```javascript
+db.tasks.find().pretty()
+```
+
+### Inspecting via MongoDB Compass (GUI):
+1. Open **MongoDB Compass**.
+2. Connect to URI: `mongodb://127.0.0.1:27017`.
+3. In the left sidebar, click on the **`task_manager`** database.
+4. Click on the **`tasks`** collection.
+5. You can view, search, edit, or delete all stored task documents visually in real time.
 
 ---
 
-## 8. Common Errors & Troubleshooting
+## 13. Troubleshooting Common Issues
 
-1. **`EADDRINUSE: address already in use :::5000`**:
-   - Another process or server is running on port 5000.
-   - Kill the existing process or run on a custom port: `PORT=5002 npm start`.
-2. **`400 Invalid Content-Type`**:
-   - Ensure you added `Content-Type: application/json` in your request headers when making `POST` or `PUT` requests.
-3. **`400 Validation Error: Title is required`**:
-   - Check your JSON body. The `title` field must be present and cannot be an empty string.
-4. **`404 Route not found`**:
-   - Double-check the URL path. Endpoint names are case-sensitive (`/tasks`, not `/Tasks`).
+| Error Message | Cause | Solution |
+|---|---|---|
+| `Failed to connect to MongoDB: connect ECONNREFUSED 127.0.0.1:27017` | Local MongoDB service is stopped. | Start MongoDB service (`net start MongoDB` or Windows Services). |
+| `Invalid Task ID: The provided ID is not a valid MongoDB ObjectId` | Request URL contains a numeric or string ID instead of a 24-character hex ObjectId. | Use the `_id` string returned by `POST /tasks` or `GET /tasks`. |
+| `Validation failed: Path title is required` | Client submitted a POST/PUT request without `title` or with blank spaces. | Provide a non-empty string for `title`. |
+| `Validation failed: urgent is not a valid priority` | Client provided a value outside enum `['low', 'medium', 'high']`. | Use only `low`, `medium`, or `high`. |
+| `Invalid Content-Type: Content-Type must be application/json` | Client forgot `Content-Type: application/json` header in POST/PUT. | Add header in Postman / REST Client. |
 
 ---
 
-## 9. Practical Viva Questions & Simple Answers
+## 14. Key Practical Questions & Answers
 
-### 1. What is REST?
-> **Answer**: REST stands for **Representational State Transfer**. It is an architectural style for designing networked web APIs that uses standard HTTP methods (`GET`, `POST`, `PUT`, `DELETE`) to perform operations on resources identified by URLs.
-
-### 2. What is Express.js?
-> **Answer**: Express.js is a minimal, fast, and flexible web application framework for Node.js. It simplifies building web servers and APIs by providing routing, middleware support, and HTTP utility methods.
-
-### 3. What is middleware in Express?
-> **Answer**: Middleware functions are functions that have access to the request object (`req`), response object (`res`), and the `next` function in the application’s request-response cycle. They can execute code, modify `req` or `res`, end the cycle, or call `next()` to pass control forward.
-
-### 4. What is the difference between `app.use()` and route-specific middleware?
-> **Answer**: 
-> - `app.use()` registers **global middleware** that executes for all incoming requests (or for all requests under a path prefix).
-> - **Route-specific middleware** is passed directly inside an individual route definition (e.g. `app.put('/tasks/:id', validateTaskId, handler)`) and runs only for that specific endpoint and method.
-
-### 5. Why must error-handling middleware be placed last?
-> **Answer**: Express runs middleware sequentially. The error-handling middleware takes 4 arguments `(err, req, res, next)`. It must be placed after all routes so that any error passed via `next(err)` anywhere upstream bubbles down to it. If placed first, normal routes would not have executed yet.
-
-### 6. What does `next()` do?
-> **Answer**: `next()` is a callback function that passes control to the next middleware function in the execution pipeline. If `next()` is not called and a response is not sent, the client request will hang indefinitely. If called with an argument like `next(err)`, it skips normal middleware and jumps straight to the error-handling middleware.
-
-### 7. What is the difference between GET, POST, PUT, and DELETE?
+### Question 1: What is the difference between SQL (Relational) and NoSQL (MongoDB) databases?
 > **Answer**:
-> - **`GET`**: Retrieves data from the server without modifying server state (Safe and Idempotent).
-> - **`POST`**: Submits new data to the server to create a new resource.
-> - **`PUT`**: Updates or replaces an existing resource by its identifier (Idempotent).
-> - **`DELETE`**: Removes the specified resource from the server.
+> - **SQL Databases** (such as MySQL, PostgreSQL) are relational, table-based databases with rigid, predefined schemas where data is stored in rows and columns and relations are managed through foreign keys and joins.
+> - **NoSQL Databases** (such as MongoDB) are document-oriented databases that store data in flexible, JSON-like BSON documents. They support dynamic schemas, scale horizontally with ease, and are well-suited for hierarchical or rapidly-changing data structures.
 
-### 8. Why do we use `express.json()`?
-> **Answer**: By default, Node.js receives HTTP request bodies as raw binary data streams. `express.json()` reads and parses incoming requests with `application/json` Content-Type into a usable JavaScript object attached to `req.body`.
-
-### 9. Why should raw error stack traces not be sent to clients?
-> **Answer**: Sending stack traces exposes sensitive server implementation details, directory structures, third-party libraries, and potential vulnerabilities to attackers. In production, clients should receive a safe, generic message (`Internal Server Error`), while full stack traces are logged securely on the server.
-
-### 10. What is the difference between HTTP 200 and HTTP 201?
+### Question 2: What is Mongoose, and why do we define Schemas and Models?
 > **Answer**:
-> - **`200 OK`**: Indicates that the request succeeded (used for successful `GET`, `PUT`, or `DELETE` requests).
-> - **`201 Created`**: Specifically indicates that the request succeeded and resulted in a **new resource** being created on the server (used for successful `POST` requests).
+> - **Mongoose** is an Object Data Modeling (ODM) library for MongoDB and Node.js.
+> - While native MongoDB is schema-less, **Schemas** in Mongoose define the structure, data types, default values, and validation rules for documents at the application layer.
+> - A **Model** is a compiled wrapper constructed from a schema that provides an interface to query, create, update, and delete documents in the underlying MongoDB collection (e.g. `Task.find()`, `Task.create()`).
 
-### 11. What is an in-memory array, and what happens to tasks after restarting the server?
-> **Answer**: An in-memory array is stored in the system's RAM during the Node.js process runtime. Because the data is not persisted to a database or disk file, all added, modified, or deleted tasks will reset to the default initial sample tasks whenever the server restarts.
+### Question 3: What is the purpose of Mongoose middleware (hooks) like `pre('save')`?
+> **Answer**:
+> - Mongoose middleware (hooks) are functions that execute automatically at specified stages of the document lifecycle (such as before or after saving, validating, or removing a document).
+> - The `pre('save')` hook allows developers to perform operations such as trimming strings, hashing passwords, or calculating derived values automatically before the document is persisted to the database.
 
-### 12. Why is a 404 handler needed?
-> **Answer**: A custom 404 handler intercepts requests made to endpoints or paths that do not exist in the routing table. Instead of returning raw HTML or an unformatted browser error, it provides a consistent, structured JSON error response informing the client that the requested resource was not found.
+---
+
+## 15. College Viva Questions & Answers
+
+### 1. What is an ODM, and how does it differ from an ORM?
+> **Answer**: ODM stands for **Object Data Modeling** (used for document/NoSQL databases like MongoDB and Mongoose). ORM stands for **Object Relational Mapping** (used for relational SQL databases like Sequelize and PostgreSQL/MySQL). Both map programming language objects to database records.
+
+### 2. How does Mongoose prevent invalid data from being saved?
+> **Answer**: Mongoose enforces **application-level schema validation**. Before executing an `insert` or `update` command, Mongoose checks document fields against the defined schema constraints (such as `required`, `enum`, `minlength`, or custom validators). If any constraint fails, it throws a `ValidationError` and prevents database execution.
+
+### 3. Why is `runValidators: true` required in `findByIdAndUpdate()`?
+> **Answer**: By default, Mongoose update operations (like `findOneAndUpdate` and `findByIdAndUpdate`) bypass schema validators to optimize performance. Passing `{ runValidators: true }` instructs Mongoose to validate the update payload against the schema before applying the update.
+
+### 4. What is a MongoDB ObjectId and how many bytes is it?
+> **Answer**: An ObjectId is a 12-byte (24-character hexadecimal) unique identifier generated by MongoDB for every document in a collection. It consists of a 4-byte timestamp, a 5-byte random value, and a 3-byte incrementing counter.
+
+### 5. Why should a server not start accepting requests before MongoDB connects?
+> **Answer**: If the HTTP server starts listening before the database connection is established, incoming client requests will fail, timeout, or attempt to query an uninitialized connection. Awaiting `mongoose.connect()` guarantees that all dependencies are ready before handling traffic.
+
+### 6. What is the difference between `new Task(data).save()` and `Task.create(data)`?
+> **Answer**: `new Task(data).save()` explicitly creates a document instance first and then saves it, giving direct access to document methods and pre-save hooks. `Task.create(data)` is a convenience method that combines instantiation and saving in a single call.
+
+### 7. What does the `trim: true` schema option do?
+> **Answer**: `trim: true` automatically removes leading and trailing whitespace from string values before they are validated and saved.
+
+### 8. Why do we keep `.env` in `.gitignore`?
+> **Answer**: `.env` files contain environment-specific configurations and sensitive credentials (such as database passwords and API keys). Committing `.env` to GitHub exposes secrets to the public, risking security breaches. A safe template `.env.example` is committed instead.

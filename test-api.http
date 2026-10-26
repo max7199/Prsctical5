@@ -1,5 +1,5 @@
 ### ============================================================================
-### Practical 4: Task Management REST API Test Suite
+### Practical 5: MongoDB & Mongoose Task Management REST API Test Suite
 ### Compatible with Visual Studio Code REST Client extension (Humao.rest-client)
 ### Base URL: http://localhost:5000
 ### ============================================================================
@@ -12,61 +12,111 @@ Accept: application/json
 
 ###
 
-### 2. POST a valid task (Expected Status: 201 Created)
+### 2. POST a valid task with all fields (Expected Status: 201 Created)
+# @name createTask
 POST {{baseUrl}}/tasks
 Content-Type: application/json
 
 {
-  "title": "Study for Express Viva",
-  "description": "Learn middleware, routing, and HTTP status codes",
+  "title": "Complete Practical 5",
+  "description": "Integrate MongoDB and Mongoose with Express",
+  "completed": false,
+  "priority": "high"
+}
+
+###
+
+### 3. POST without a title (Expected Status: 400 Bad Request - Validation Error)
+POST {{baseUrl}}/tasks
+Content-Type: application/json
+
+{
+  "description": "Missing title field",
+  "completed": false,
+  "priority": "medium"
+}
+
+###
+
+### 4. POST with a blank/empty title (Expected Status: 400 Bad Request - Validation Error)
+POST {{baseUrl}}/tasks
+Content-Type: application/json
+
+{
+  "title": "   ",
+  "description": "Whitespace only title",
   "completed": false
 }
 
 ###
 
-### 3. POST without a title (Expected Status: 400 Bad Request)
+### 5. POST with invalid priority 'urgent' (Expected Status: 400 Bad Request - Enum Validation)
 POST {{baseUrl}}/tasks
 Content-Type: application/json
 
 {
-  "description": "Task missing title field",
-  "completed": false
+  "title": "Invalid Priority Task",
+  "description": "Priority 'urgent' is not in enum [low, medium, high]",
+  "priority": "urgent"
 }
 
 ###
 
-### 4. POST without application/json Content-Type (Expected Status: 400 Bad Request)
+### 6. POST without completed or priority to test schema defaults (Expected Status: 201 Created)
 POST {{baseUrl}}/tasks
-Content-Type: text/plain
+Content-Type: application/json
 
-title=No+Json+Header
+{
+  "title": "Default Schema Values Task",
+  "description": "completed should default to false, priority to medium"
+}
 
 ###
 
-### 5. PUT an existing task (Expected Status: 200 OK)
-PUT {{baseUrl}}/tasks/1
+### 7. GET specific task by MongoDB ObjectId (Supplementary Endpoint - Expected Status: 200 OK)
+# Replace {{taskId}} with an actual ObjectId returned from POST /tasks
+@taskId = {{createTask.response.body._id}}
+GET {{baseUrl}}/tasks/{{taskId}}
+Accept: application/json
+
+###
+
+### 8. GET task with nonexistent valid ObjectId (Expected Status: 404 Not Found)
+GET {{baseUrl}}/tasks/507f1f77bcf86cd799439011
+Accept: application/json
+
+###
+
+### 9. GET task with malformed/invalid ObjectId (Expected Status: 400 Bad Request)
+GET {{baseUrl}}/tasks/invalid-object-id
+Accept: application/json
+
+###
+
+### 10. PUT an existing task by MongoDB ObjectId (Expected Status: 200 OK)
+PUT {{baseUrl}}/tasks/{{taskId}}
 Content-Type: application/json
 
 {
   "completed": true,
-  "description": "Completed Practical 4 and verified all endpoints"
+  "priority": "low",
+  "description": "Updated task description and marked completed"
 }
 
 ###
 
-### 6. PUT a nonexistent task (Expected Status: 404 Not Found)
-PUT {{baseUrl}}/tasks/9999
+### 11. PUT a nonexistent task by valid ObjectId (Expected Status: 404 Not Found)
+PUT {{baseUrl}}/tasks/507f1f77bcf86cd799439011
 Content-Type: application/json
 
 {
-  "title": "Non-existent Task",
-  "completed": true
+  "title": "Non-existent Task"
 }
 
 ###
 
-### 7. PUT with an invalid ID (Expected Status: 400 Bad Request)
-PUT {{baseUrl}}/tasks/abc
+### 12. PUT with an invalid/malformed ObjectId (Expected Status: 400 Bad Request)
+PUT {{baseUrl}}/tasks/invalid-id-123
 Content-Type: application/json
 
 {
@@ -75,16 +125,26 @@ Content-Type: application/json
 
 ###
 
-### 8. DELETE an existing task (Expected Status: 200 OK)
-DELETE {{baseUrl}}/tasks/2
+### 13. DELETE an existing task by MongoDB ObjectId (Expected Status: 200 OK)
+DELETE {{baseUrl}}/tasks/{{taskId}}
+Accept: application/json
 
 ###
 
-### 9. DELETE a nonexistent task (Expected Status: 404 Not Found)
-DELETE {{baseUrl}}/tasks/9999
+### 14. DELETE a nonexistent task by valid ObjectId (Expected Status: 404 Not Found)
+DELETE {{baseUrl}}/tasks/507f1f77bcf86cd799439011
+Accept: application/json
 
 ###
 
-### 10. Request an undefined route (Expected Status: 404 Not Found)
-GET {{baseUrl}}/non-existent-endpoint
+### 15. POST without application/json Content-Type (Expected Status: 400 Bad Request)
+POST {{baseUrl}}/tasks
+Content-Type: text/plain
+
+title=No+Json+Header
+
+###
+
+### 16. Request an undefined route (Expected Status: 404 Not Found)
+GET {{baseUrl}}/api/non-existent-endpoint
 Accept: application/json
